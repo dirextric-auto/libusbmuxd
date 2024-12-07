@@ -1,6 +1,10 @@
 name: build
 
-on: [push]
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: '0 0 1 * *'
 
 jobs:
   build-linux-ubuntu:
@@ -10,14 +14,14 @@ jobs:
       run: |
           echo "target_triplet=`gcc -dumpmachine`" >> $GITHUB_ENV
     - name: fetch libplist
-      uses: dawidd6/action-download-artifact@v2
+      uses: dawidd6/action-download-artifact@v6
       with:
         github_token: ${{secrets.GITHUB_TOKEN}}
         workflow: build.yml
         name: libplist-latest_${{env.target_triplet}}
         repo: libimobiledevice/libplist
     - name: fetch libimobiledevice-glue
-      uses: dawidd6/action-download-artifact@v2
+      uses: dawidd6/action-download-artifact@v6
       with:
         github_token: ${{secrets.GITHUB_TOKEN}}
         workflow: build.yml
@@ -31,7 +35,7 @@ jobs:
           done
           sudo cp -r extract/* /
           sudo ldconfig
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v4
     - name: autogen
       run: ./autogen.sh PKG_CONFIG_PATH=/usr/local/lib/pkgconfig LDFLAGS="-Wl,-rpath=/usr/local/lib"
     - name: make
@@ -44,7 +48,7 @@ jobs:
           DESTDIR=`pwd`/dest make install
           tar -C dest -cf libusbmuxd.tar usr
     - name: publish artifact
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v4
       with:
         name: libusbmuxd-latest_${{env.target_triplet}}
         path: libusbmuxd.tar
@@ -60,14 +64,14 @@ jobs:
           fi
       shell: bash
     - name: fetch libplist
-      uses: dawidd6/action-download-artifact@v2
+      uses: dawidd6/action-download-artifact@v6
       with:
         github_token: ${{secrets.GITHUB_TOKEN}}
         workflow: build.yml
         name: libplist-latest_macOS
         repo: libimobiledevice/libplist
     - name: fetch libimobiledevice-glue
-      uses: dawidd6/action-download-artifact@v2
+      uses: dawidd6/action-download-artifact@v6
       with:
         github_token: ${{secrets.GITHUB_TOKEN}}
         workflow: build.yml
@@ -80,7 +84,7 @@ jobs:
             tar -C extract -xvf $I
           done
           sudo cp -r extract/* /
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v4
     - name: autogen
       run: |
           SDKDIR=`xcrun --sdk macosx --show-sdk-path`
@@ -104,12 +108,12 @@ jobs:
           DESTDIR=`pwd`/dest make install
           tar -C dest -cf libusbmuxd.tar usr
     - name: publish artifact
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v4
       with:
         name: libusbmuxd-latest_macOS
         path: libusbmuxd.tar
   build-windows:
-    runs-on: windows-latest
+    runs-on: windows-2019
     defaults:
       run:
         shell: msys2 {0}
@@ -139,15 +143,16 @@ jobs:
           dest=`echo ${{ matrix.msystem }} |tr [:upper:] [:lower:]`
           echo "dest=$dest" >> $GITHUB_ENV
           echo "target_triplet=`gcc -dumpmachine`" >> $GITHUB_ENV
+          git config --global core.autocrlf false
     - name: fetch libplist
-      uses: dawidd6/action-download-artifact@v2
+      uses: dawidd6/action-download-artifact@v6
       with:
         github_token: ${{secrets.GITHUB_TOKEN}}
         workflow: build.yml
         name: libplist-latest_${{ matrix.arch }}-${{ env.dest }}
         repo: libimobiledevice/libplist
     - name: fetch libimobiledevice-glue
-      uses: dawidd6/action-download-artifact@v2
+      uses: dawidd6/action-download-artifact@v6
       with:
         github_token: ${{secrets.GITHUB_TOKEN}}
         workflow: build.yml
@@ -160,7 +165,7 @@ jobs:
             tar -C extract -xvf $I
           done
           cp -r extract/* /
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v4
     - name: autogen
       run: ./autogen.sh CC=gcc CXX=g++
     - name: make
@@ -173,7 +178,7 @@ jobs:
           DESTDIR=`pwd`/dest make install
           tar -C dest -cf libusbmuxd.tar ${{ env.dest }}
     - name: publish artifact
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v4
       with:
         name: libusbmuxd-latest_${{ matrix.arch }}-${{ env.dest }}
         path: libusbmuxd.tar

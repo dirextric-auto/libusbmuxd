@@ -31,15 +31,18 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
-#include <fcntl.h>
 #include <stddef.h>
-#include <unistd.h>
 #include <errno.h>
-#include <getopt.h>
-#ifdef WIN32
+
+#ifdef _WIN32
 #include <winsock2.h>
 #include <windows.h>
+#ifndef _MSC_VER
+#include <unistd.h>
+#endif
 #else
+#include <fcntl.h>
+#include <unistd.h>
 #include <sys/select.h>
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -47,14 +50,22 @@
 #include <signal.h>
 #endif
 
-#include "usbmuxd.h"
+#ifdef _MSC_VER
+#include <basetsd.h>
+typedef SSIZE_T ssize_t;
+#define STDIN_FILENO  _fileno(stdin)
+#define STDOUT_FILENO _fileno(stdout)
+#endif
+
+#include <getopt.h>
 #include <libimobiledevice-glue/socket.h>
+#include "usbmuxd.h"
 
 static int debug_level = 0;
 
 static size_t read_data_socket(int fd, uint8_t* buf, size_t bufsize)
 {
-#ifdef WIN32
+#ifdef _WIN32
     u_long bytesavailable = 0;
     if (fd == STDIN_FILENO) {
         bytesavailable = bufsize;
@@ -140,7 +151,7 @@ int main(int argc, char **argv)
             print_usage(argc, argv, 0);
             return 0;
         case 'v':
-            printf("%s %s\n", TOOL_NAME, PACKAGE_VERSION);
+            printf("%s %s\n", TOOL_NAME, libusbmuxd_version());
             return 0;
         default:
             print_usage(argc, argv, 1);
@@ -166,7 +177,7 @@ int main(int argc, char **argv)
         return -EINVAL;
     }
 
-#ifndef WIN32
+#ifndef _WIN32
     signal(SIGPIPE, SIG_IGN);
 #endif
 
@@ -216,14 +227,14 @@ int main(int argc, char **argv)
         unsigned char saddr_[32];
         memset(saddr_, '\0', sizeof(saddr_));
         struct sockaddr* saddr = (struct sockaddr*)&saddr_[0];
-        if (((char*)dev->conn_data)[1] == 0x02) { // AF_INET
+        if (dev->conn_data[1] == 0x02) { // AF_INET
             saddr->sa_family = AF_INET;
-            memcpy(&saddr->sa_data[0], (char*)dev->conn_data+2, 14);
+            memcpy(&saddr->sa_data[0], (uint8_t*)dev->conn_data+2, 14);
         }
-        else if (((char*)dev->conn_data)[1] == 0x1E) { //AF_INET6 (bsd)
+        else if (dev->conn_data[1] == 0x1E) { //AF_INET6 (bsd)
 #ifdef AF_INET6
             saddr->sa_family = AF_INET6;
-            memcpy(&saddr->sa_data[0], (char*)dev->conn_data+2, 26);
+            memcpy(&saddr->sa_data[0], (uint8_t*)dev->conn_data+2, 26);
 #else
             fprintf(stderr, "ERROR: Got an IPv6 address but this system doesn't support IPv6\n");
             free(dev_list);
@@ -231,7 +242,7 @@ int main(int argc, char **argv)
 #endif
         }
         else {
-            fprintf(stderr, "Unsupported address family 0x%02x\n", ((char*)dev->conn_data)[1]);
+            fprintf(stderr, "Unsupported address family 0x%02x\n", dev->conn_data[1]);
             free(dev_list);
             return 1;
         }

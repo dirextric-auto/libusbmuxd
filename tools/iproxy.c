@@ -32,20 +32,22 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <fcntl.h>
 #include <stddef.h>
-#include <unistd.h>
 #include <errno.h>
-#include <getopt.h>
-#ifdef WIN32
+
+#ifdef _WIN32
 #include <winsock2.h>
 #include <windows.h>
 typedef unsigned int socklen_t;
 #else
+#include <fcntl.h>
+#include <unistd.h>
 #include <sys/select.h>
 #include <sys/socket.h>
 #include <signal.h>
 #endif
+
+#include <getopt.h>
 #include <libimobiledevice-glue/socket.h>
 #include <libimobiledevice-glue/thread.h>
 #include "usbmuxd.h"
@@ -129,15 +131,15 @@ static void *acceptor_thread(void *arg)
 		struct sockaddr_storage saddr_storage;
 		struct sockaddr* saddr = (struct sockaddr*)&saddr_storage;
 
-		if (((char*)dev->conn_data)[1] == 0x02) { // AF_INET
+		if (dev->conn_data[1] == 0x02) { // AF_INET
 			saddr->sa_family = AF_INET;
-			memcpy(&saddr->sa_data[0], (char*)dev->conn_data + 2, 14);
+			memcpy(&saddr->sa_data[0], (uint8_t*)dev->conn_data+2, 14);
 		}
-		else if (((char*)dev->conn_data)[1] == 0x1E) { //AF_INET6 (bsd)
+		else if (dev->conn_data[1] == 0x1E) { //AF_INET6 (bsd)
 #ifdef AF_INET6
 			saddr->sa_family = AF_INET6;
 			/* copy the address and the host dependent scope id */
-			memcpy(&saddr->sa_data[0], (char*)dev->conn_data + 2, 26);
+			memcpy(&saddr->sa_data[0], (uint8_t*)dev->conn_data+2, 26);
 #else
 			fprintf(stderr, "ERROR: Got an IPv6 address but this system doesn't support IPv6\n");
 			CDATA_FREE(cdata);
@@ -145,7 +147,7 @@ static void *acceptor_thread(void *arg)
 #endif
 		}
 		else {
-			fprintf(stderr, "Unsupported address family 0x%02x\n", ((char*)dev->conn_data)[1]);
+			fprintf(stderr, "Unsupported address family 0x%02x\n", dev->conn_data[1]);
 			CDATA_FREE(cdata);
 			return NULL;
 		}
@@ -154,10 +156,10 @@ static void *acceptor_thread(void *arg)
 		if (!socket_addr_to_string(saddr, addrtxt, sizeof(addrtxt))) {
 			fprintf(stderr, "Failed to convert network address: %d (%s)\n", errno, strerror(errno));
 		}
-		fprintf(stdout, "Requesting connecion to NETWORK device %s (serial: %s), port %d\n", addrtxt, dev->udid, cdata->device_port);
+		fprintf(stdout, "Requesting connection to NETWORK device %s (serial: %s), port %d\n", addrtxt, dev->udid, cdata->device_port);
 		cdata->sfd = socket_connect_addr(saddr, cdata->device_port);
 	} else if (dev->conn_type == CONNECTION_TYPE_USB) {
-		fprintf(stdout, "Requesting connecion to USB device handle %d (serial: %s), port %d\n", dev->handle, dev->udid, cdata->device_port);
+		fprintf(stdout, "Requesting connection to USB device handle %d (serial: %s), port %d\n", dev->handle, dev->udid, cdata->device_port);
 
 		cdata->sfd = usbmuxd_connect(dev->handle, cdata->device_port);
 	}
@@ -169,10 +171,11 @@ static void *acceptor_thread(void *arg)
 		FD_ZERO(&fds);
 		FD_SET(cdata->fd, &fds);
 		FD_SET(cdata->sfd, &fds);
+		int maxfd = cdata->fd > cdata->sfd ? cdata->fd : cdata->sfd;
 
 		while (1) {
 			fd_set read_fds = fds;
-			int ret_sel = select(cdata->sfd+1, &read_fds, NULL, NULL, NULL);
+			int ret_sel = select(maxfd+1, &read_fds, NULL, NULL, NULL);
 			if (ret_sel < 0) {
 				perror("select");
 				break;
@@ -300,7 +303,7 @@ int main(int argc, char **argv)
 			print_usage(argc, argv, 0);
 			return 0;
 		case 'v':
-			printf("%s %s\n", TOOL_NAME, PACKAGE_VERSION);
+			printf("%s %s\n", TOOL_NAME, libusbmuxd_version());
 			return 0;
 		default:
 			print_usage(argc, argv, 1);
@@ -369,7 +372,7 @@ int main(int argc, char **argv)
 		return -1;
 	}
 
-#ifndef WIN32
+#ifndef _WIN32
 	signal(SIGPIPE, SIG_IGN);
 #endif
 
@@ -377,7 +380,7 @@ int main(int argc, char **argv)
 	for (i = 0; i < num_pairs; i++) {
 		printf("Creating listening port %d for device port %d\n", listen_port[i], device_port[i]);
 		if (!source_addr) {
-			listen_sock[num_listen].fd = socket_create("127.0.0.1", listen_port[i]);
+			listen_sock[num_listen].fd = socket_create(NULL, listen_port[i]);
 			if (listen_sock[num_listen].fd < 0) {
 				int j;
 				fprintf(stderr, "Error creating socket for listen port %u: %s\n", listen_port[i], strerror(errno));
@@ -390,21 +393,6 @@ int main(int argc, char **argv)
 			}
 			listen_sock[num_listen].index = i;
 			num_listen++;
-#if defined(AF_INET6)
-			listen_sock[num_listen].fd = socket_create("::1", listen_port[i]);
-			if (listen_sock[num_listen].fd < 0) {
-				int j;
-				fprintf(stderr, "Error creating socket for listen port %u: %s\n", listen_port[i], strerror(errno));
-				free(source_addr);
-				free(device_udid);
-				for (j = num_listen; j >= 0; j--) {
-					socket_close(listen_sock[j].fd);
-				}
-				return -errno;
-			}
-			listen_sock[num_listen].index = i;
-			num_listen++;
-#endif
 		} else {
 			listen_sock[num_listen].fd = socket_create(source_addr, listen_port[i]);
 			if (listen_sock[num_listen].fd < 0) {
@@ -426,7 +414,7 @@ int main(int argc, char **argv)
 	fd_set fds;
 	FD_ZERO(&fds);
 	for (i = 0; i < num_listen; i++) {
-#ifdef WIN32
+#ifdef _WIN32
 		u_long l_yes = 1;
 		ioctlsocket(listen_sock[i].fd, FIONBIO, &l_yes);
 #else
